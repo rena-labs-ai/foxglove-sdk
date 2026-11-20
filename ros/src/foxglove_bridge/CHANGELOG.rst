@@ -2,6 +2,11 @@
 Changelog for package foxglove_bridge
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* Enforce the previously ignored ``client_topic_whitelist`` (backport of foxglove-sdk#1508 to 3.2.2,
+  without the per-client error status, which SDK 0.15.2 cannot send)
+
 3.2.2 (2025-10-24)
 ------------------
 * Fix publishing from Foxglove 3D panel (`#716 <https://github.com/foxglove/foxglove-sdk/pull/716>`_)

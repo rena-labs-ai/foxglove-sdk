@@ -77,6 +77,8 @@ private:
   std::unordered_map<ChannelId, foxglove::RawChannel> _channels;
   std::unordered_map<ChannelAndClientId, Subscription, PairHash> _subscriptions;
   std::unordered_map<ChannelAndClientId, ClientAdvertisement, PairHash> _clientAdvertisedTopics;
+  // Client channels rejected by client_topic_whitelist; their messages are dropped silently.
+  std::unordered_set<ChannelAndClientId, PairHash> _rejectedClientChannels;
   foxglove::WebSocketServerCapabilities _capabilities;
   ServicesByType _advertisedServices;
   std::unordered_map<std::string, GenericClient::SharedPtr> _serviceClients;
@@ -85,6 +87,7 @@ private:
   foxglove_bridge::MessageDefinitionCache _messageDefinitionCache;
   std::vector<std::regex> _topicWhitelistPatterns;
   std::vector<std::regex> _serviceWhitelistPatterns;
+  std::vector<std::regex> _clientTopicWhitelistPatterns;
   std::vector<std::regex> _assetUriAllowlistPatterns;
   std::vector<std::regex> _bestEffortQosTopicWhiteListPatterns;
   std::shared_ptr<ParameterInterface> _paramInterface;
@@ -113,6 +116,12 @@ private:
   void unsubscribe(ChannelId channelId, const foxglove::ClientMetadata& client);
 
   void clientAdvertise(ClientId clientId, const foxglove::ClientChannel& channel);
+
+  // Returns whether client_topic_whitelist allows a client to publish on the resolved
+  // `topicName`. Otherwise rejects the client channel: logs a warning and records the channel so
+  // that the message handlers drop its messages silently. Must be called with
+  // _clientAdvertisementsMutex held.
+  bool admitClientChannel(ClientId clientId, ChannelId channelId, const std::string& topicName);
 
   void clientUnadvertise(ClientId clientId, ChannelId clientChannelId);
 

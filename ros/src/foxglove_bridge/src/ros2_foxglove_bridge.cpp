@@ -91,7 +91,7 @@ FoxgloveBridge::FoxgloveBridge(const rclcpp::NodeOptions& options)
   const auto capabilities = this->get_parameter(PARAM_CAPABILITIES).as_string_array();
   const auto clientTopicWhiteList =
     this->get_parameter(PARAM_CLIENT_TOPIC_WHITELIST).as_string_array();
-  const auto clientTopicWhiteListPatterns = parseRegexStrings(this, clientTopicWhiteList);
+  _clientTopicWhitelistPatterns = parseRegexStrings(this, clientTopicWhiteList);
   _includeHidden = this->get_parameter(PARAM_INCLUDE_HIDDEN).as_bool();
   const auto assetUriAllowlist = this->get_parameter(PARAM_ASSET_URI_ALLOWLIST).as_string_array();
   _assetUriAllowlistPatterns = parseRegexStrings(this, assetUriAllowlist);
@@ -682,6 +682,10 @@ void FoxgloveBridge::clientAdvertise(ClientId clientId, const foxglove::ClientCh
                              std::to_string(channel.id) + " with empty schema name");
   }
 
+  if (!admitClientChannel(clientId, channel.id, topicName)) {
+    return;
+  }
+
   if (encoding == "json") {
     // register the JSON parser for this schemaName
     std::string schemaName(channel.schema_name);
@@ -747,6 +751,26 @@ void FoxgloveBridge::clientAdvertise(ClientId clientId, const foxglove::ClientCh
   }
 }
 
+bool FoxgloveBridge::admitClientChannel(ClientId clientId, ChannelId channelId,
+                                        const std::string& topicName) {
+  // Match the name the publisher would be created on, so that relative or remapped names can't
+  // slip past the patterns.
+  const auto resolvedTopicName = this->get_node_topics_interface()->resolve_topic_name(topicName);
+  if (isWhitelisted(resolvedTopicName, _clientTopicWhitelistPatterns)) {
+    return true;
+  }
+
+  // SDK 0.15.2 has no per-client status (only publishStatus, to every client), so unlike upstream
+  // #1508 the client is not told; details go to the log.
+  _rejectedClientChannels.insert({channelId, clientId});
+  RCLCPP_WARN(this->get_logger(),
+              "Rejected advertisement of channel %lu on \"%s\" from client %u: the topic does not "
+              "match %s. Messages on this channel will be dropped.",
+              static_cast<unsigned long>(channelId), resolvedTopicName.c_str(), clientId,
+              PARAM_CLIENT_TOPIC_WHITELIST);
+  return false;
+}
+
 void FoxgloveBridge::clientUnadvertise(ClientId clientId, ChannelId clientChannelId) {
   std::lock_guard<std::mutex> lock(_clientAdvertisementsMutex);
 
@@ -754,6 +778,9 @@ void FoxgloveBridge::clientUnadvertise(ClientId clientId, ChannelId clientChanne
 
   auto it = _clientAdvertisedTopics.find(key);
   if (it == _clientAdvertisedTopics.end()) {
+    if (_rejectedClientChannels.erase(key) > 0) {
+      return;
+    }
     throw ClientChannelError("Ignoring client unadvertisement from client ID " +
                              std::to_string(clientId) + " for unknown channel " +
                              std::to_string(clientChannelId));
@@ -786,6 +813,9 @@ void FoxgloveBridge::clientMessage(ClientId clientId, ChannelId clientChannelId,
 
     auto it = _clientAdvertisedTopics.find(key);
     if (it == _clientAdvertisedTopics.end()) {
+      if (_rejectedClientChannels.count(key) > 0) {
+        return;
+      }
       throw ClientChannelError("Dropping client message from client ID " +
                                std::to_string(clientId) + " for unknown channel " +
                                std::to_string(clientChannelId) +
